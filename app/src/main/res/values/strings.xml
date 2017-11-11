@@ -1,4 +1,6 @@
 <resources>
     <string name="app_name">Plotit</string>
     <string name="chooser">Choose option</string>
+    <string name="sign_in_err">Something went wrong, Please try agian.</string>
+    <string name="logIn_sucess">Logging You In, Welcome!</string>
 </resources>
