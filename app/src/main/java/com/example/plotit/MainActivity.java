@@ -1,14 +1,21 @@
 package com.example.plotit;
 
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.support.annotation.NonNull;
+import android.support.v4.app.ActivityCompat;
+import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
+import android.widget.AdapterView;
+import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.LinearLayout;
 import android.widget.SeekBar;
+import android.widget.Spinner;
 import android.widget.Toast;
 
 import com.firebase.ui.auth.AuthUI;
@@ -20,8 +27,14 @@ import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileNotFoundException;
+import java.io.FileReader;
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
@@ -33,11 +46,19 @@ public class MainActivity extends AppCompatActivity {
     public static final String TAG = MainActivity.class.getSimpleName();
     private static final int RC_SIGN_IN = 2;
     private static final String ANONYMOUS = "anonymous";
+    private static final int RC_PERMISSION = 300;
+
     @BindView(R.id.upload_button)
     Button uploadBtn;
 
     @BindView(R.id.seek_process)
     SeekBar mProgressBar;
+
+    @BindView(R.id.spinner_chooser_X)
+    Spinner mSpinnerX;
+
+    @BindView(R.id.spinner_chooser_Y)
+    Spinner mSpinnerY;
 
     // Firebase Stuff
     private FirebaseStorage mFirebaseStorage;
@@ -49,6 +70,8 @@ public class MainActivity extends AppCompatActivity {
 
     // Local Variables
     private String mUsername;
+    private String xValue;
+    private String yValue;
 
     @Override
     protected void onResume() {
@@ -77,6 +100,10 @@ public class MainActivity extends AppCompatActivity {
         mFirebaseStorgeReference = mFirebaseStorage.getReference().child("csvs");
         mFirebaseAuth = FirebaseAuth.getInstance();
 
+        if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, RC_PERMISSION);
+        }
+
         mFirebaseAuthListener = new FirebaseAuth.AuthStateListener() {
             @Override
             public void onAuthStateChanged(@NonNull FirebaseAuth firebaseAuth) {
@@ -99,24 +126,68 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
         };
+
+
+        mSpinnerX.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
+                xValue = adapterView.getItemAtPosition(i).toString();
+                Toast.makeText(MainActivity.this, "selectedItemis: " + xValue, Toast.LENGTH_SHORT).show();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> adapterView) {
+                // Do nothing for now
+            }
+        });
+
+        mSpinnerY.setSelection(2);
+        mSpinnerY.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
+                yValue = adapterView.getItemAtPosition(i).toString();
+//                if (yValue == xValue) {
+//                    final AlertDialog.Builder alert = new AlertDialog.Builder(MainActivity.this);
+//                    alert.setMessage(getString(R.string.sameXY_values_error))
+//                            .setTitle(getString(R.string.same_XY_dialog_title));
+//                    alert.setPositiveButton(getString(R.string.ok), new DialogInterface.OnClickListener() {
+//                        @Override
+//                        public void onClick(DialogInterface dialogInterface, int i) {
+//                            finish();
+//                        }
+//                    });
+//
+//                    alert.create().show();
+//                }
+                Toast.makeText(MainActivity.this, "selectedItemis: " + yValue, Toast.LENGTH_SHORT).show();
+
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> adapterView) {
+
+            }
+        });
+
     }
 
-    @OnClick(R.id.upload_button) void upload(){
+    @OnClick(R.id.upload_button)
+    void upload() {
         mProgressBar.setVisibility(View.VISIBLE);
         mProgressBar.setIndeterminate(true);
         csvFilePicker();
     }
 
-    private void onSignedInInitialize(String username){
+    private void onSignedInInitialize(String username) {
         mUsername = username;
     }
 
-    private void onSignedOutCleanup(){
+    private void onSignedOutCleanup() {
         mUsername = ANONYMOUS;
 
     }
 
-    void csvFilePicker(){
+    void csvFilePicker() {
         Intent intent = new Intent(Intent.ACTION_GET_CONTENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
         intent.setType("text/csv");
@@ -126,8 +197,9 @@ public class MainActivity extends AppCompatActivity {
     @Override
     protected void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
-        if(requestCode == RC_PICK_CSV && resultCode == RESULT_OK){
+        if (requestCode == RC_PICK_CSV && resultCode == RESULT_OK) {
             importCSV(new File(data.getData().getPath()), data);
+
         }
         if (requestCode == RC_SIGN_IN) {
             if (resultCode == RESULT_OK) {
@@ -139,8 +211,53 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
-    void importCSV(File path, Intent data){
+    @Override
+    public void onRequestPermissionsResult(int requestCode, @NonNull String[] permissions, @NonNull int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode == RC_PERMISSION) {
+            if (grantResults.length > 0 && grantResults[0] != PackageManager.PERMISSION_GRANTED) {
+                Toast.makeText(this, "Please grant permission to continue!", Toast.LENGTH_SHORT).show();
+            }
+        }
+    }
+
+    @Override
+    public void onBackPressed() {
+        super.onBackPressed();
+        LinearLayout layoutBefore = findViewById(R.id.layoutBefore);
+        layoutBefore.setVisibility(View.VISIBLE);
+        LinearLayout layoutAfter = findViewById(R.id.layoutAfter);
+        layoutAfter.setVisibility(View.GONE);
+    }
+
+    void importCSV(File path, Intent data) {
+        List<String> headerList = null;
         Log.d(TAG, "path of the file is : " + path.toString());
+        File csvFile = new File(data.getData().getPath());
+        csvFile = new File(csvFile.getAbsolutePath());
+        try {
+
+            headerList = new ArrayList<>();
+            BufferedReader csvFileRead = new BufferedReader(new FileReader(csvFile));
+            String headerLine = csvFileRead.readLine();
+            String[] headerArray = headerLine.split(",");
+            headerList = Arrays.asList(headerArray);
+            for (String item : headerList)
+                Log.e(TAG, item);
+            //Log.e(TAG, headerList   .get(3));
+        } catch (FileNotFoundException e) {
+            e.printStackTrace();
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+
+
+        LinearLayout layoutBefore = findViewById(R.id.layoutBefore);
+        layoutBefore.setVisibility(View.GONE);
+        LinearLayout layoutAfter = findViewById(R.id.layoutAfter);
+        layoutAfter.setVisibility(View.VISIBLE);
+        setupspinner(headerList);
+
         Uri selectedCsvUri = data.getData();
         StorageReference csvReference = mFirebaseStorgeReference.child(selectedCsvUri.getLastPathSegment());
         csvReference.putFile(selectedCsvUri).addOnSuccessListener(this, new OnSuccessListener<UploadTask.TaskSnapshot>() {
@@ -148,9 +265,15 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
                 mProgressBar.setVisibility(View.GONE);
                 Toast.makeText(MainActivity.this, "File Sucessfully Uploaded", Toast.LENGTH_LONG).show();
-                Intent intent = new Intent(MainActivity.this, GraphActivity.class);
-                startActivity(intent);
+//                Intent intent = new Intent(MainActivity.this, GraphActivity.class);
+                //              startActivity(intent);
             }
         });
+    }
+
+    private void setupspinner(List<String> headers) {
+        ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, headers);
+        mSpinnerX.setAdapter(spinnerAdapter);
+        mSpinnerY.setAdapter(spinnerAdapter);
     }
 }
