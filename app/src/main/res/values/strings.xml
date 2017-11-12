@@ -7,4 +7,5 @@
     <string name="same_XY_dialog_title">Oops</string>
     <string name="ok">OK</string>
     <string name="double_back_press">Please click Back again to exit.</string>
+    <string name="image_url">image_url</string>
 </resources>

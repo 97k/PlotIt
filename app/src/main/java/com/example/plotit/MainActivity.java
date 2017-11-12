@@ -366,6 +366,9 @@ public class MainActivity extends AppCompatActivity {
                     @Override
                     public void onResponse(JSONObject response) {
                         Log.d("Response", response.toString());
+                        String imageUrl = parseJson(response);
+                        Intent intent = new Intent(MainActivity.this, GraphActivity.class);
+                        intent.putExtra(getString(R.string.image_url), imageUrl);
                     }
                 },
                 new Response.ErrorListener() {
@@ -375,5 +378,11 @@ public class MainActivity extends AppCompatActivity {
                     }
                 });
         mRequestQueue.add(getRequest);
+    }
+
+    private String parseJson(JSONObject resultData){
+        //TODO: To be implemented after the API's has been made
+        String imageURl = null;
+        return imageURl;
     }
 }
