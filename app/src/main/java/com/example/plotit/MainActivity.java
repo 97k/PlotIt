@@ -1,12 +1,15 @@
 package com.example.plotit;
 
+import android.content.DialogInterface;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.Handler;
 import android.support.annotation.NonNull;
 import android.support.v4.app.ActivityCompat;
 import android.support.v4.content.ContextCompat;
+import android.support.v7.app.AlertDialog;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
@@ -18,6 +21,14 @@ import android.widget.SeekBar;
 import android.widget.Spinner;
 import android.widget.Toast;
 
+import com.android.volley.AuthFailureError;
+import com.android.volley.Request;
+import com.android.volley.RequestQueue;
+import com.android.volley.Response;
+import com.android.volley.VolleyError;
+import com.android.volley.toolbox.JsonObjectRequest;
+import com.android.volley.toolbox.StringRequest;
+import com.android.volley.toolbox.Volley;
 import com.firebase.ui.auth.AuthUI;
 import com.google.android.gms.tasks.OnSuccessListener;
 import com.google.firebase.auth.FirebaseAuth;
@@ -27,6 +38,8 @@ import com.google.firebase.storage.FirebaseStorage;
 import com.google.firebase.storage.StorageReference;
 import com.google.firebase.storage.UploadTask;
 
+import org.json.JSONObject;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -34,7 +47,9 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import butterknife.BindView;
 import butterknife.ButterKnife;
@@ -68,10 +83,15 @@ public class MainActivity extends AppCompatActivity {
     private DatabaseReference mFirebaseDatabaseReference;
     private FirebaseDatabase mFirebaseDatabase;
 
+    //Volley
+    private RequestQueue mRequestQueue;
+
     // Local Variables
     private String mUsername;
     private String xValue;
     private String yValue;
+    private boolean doubleBackToExitPressedOnce = false;
+
 
     @Override
     protected void onResume() {
@@ -96,9 +116,11 @@ public class MainActivity extends AppCompatActivity {
         mUsername = ANONYMOUS;
         mFirebaseStorage = FirebaseStorage.getInstance();
         mFirebaseDatabase = FirebaseDatabase.getInstance();
+        mRequestQueue = Volley.newRequestQueue(this);
         //mFirebaseDatabaseReference = mFirebaseDatabase.getReference().child("head"); /* TODO:// Update here! */
         mFirebaseStorgeReference = mFirebaseStorage.getReference().child("csvs");
         mFirebaseAuth = FirebaseAuth.getInstance();
+
 
         if (ContextCompat.checkSelfPermission(this, android.Manifest.permission.READ_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
             ActivityCompat.requestPermissions(this, new String[]{android.Manifest.permission.READ_EXTERNAL_STORAGE}, RC_PERMISSION);
@@ -128,10 +150,15 @@ public class MainActivity extends AppCompatActivity {
         };
 
 
+        /**
+         * Below two method calls, get us the headers selected by the user!
+         */
         mSpinnerX.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
                 xValue = adapterView.getItemAtPosition(i).toString();
+                if (xValue==yValue)
+                    showAlertDialog();
                 Toast.makeText(MainActivity.this, "selectedItemis: " + xValue, Toast.LENGTH_SHORT).show();
             }
 
@@ -141,36 +168,44 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
+        mSpinnerY.setContentDescription("Select Y");
         mSpinnerY.setSelection(2);
         mSpinnerY.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> adapterView, View view, int i, long l) {
                 yValue = adapterView.getItemAtPosition(i).toString();
-//                if (yValue == xValue) {
-//                    final AlertDialog.Builder alert = new AlertDialog.Builder(MainActivity.this);
-//                    alert.setMessage(getString(R.string.sameXY_values_error))
-//                            .setTitle(getString(R.string.same_XY_dialog_title));
-//                    alert.setPositiveButton(getString(R.string.ok), new DialogInterface.OnClickListener() {
-//                        @Override
-//                        public void onClick(DialogInterface dialogInterface, int i) {
-//                            finish();
-//                        }
-//                    });
-//
-//                    alert.create().show();
-//                }
+                if (yValue == xValue)
+                    showAlertDialog();
+
+                /**
+                 * @params xValue, yValue These two are the selected index by the user, and is sent
+                 * to the server via a POST request, Using Volley.
+                 */
+                makePostRequest(xValue, yValue);
                 Toast.makeText(MainActivity.this, "selectedItemis: " + yValue, Toast.LENGTH_SHORT).show();
 
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> adapterView) {
+                // Do nothing for now
+            }
+        });
+    }
 
+    private void showAlertDialog(){
+        final AlertDialog.Builder alert = new AlertDialog.Builder(MainActivity.this);
+        alert.setMessage(getString(R.string.sameXY_values_error))
+                .setTitle(getString(R.string.same_XY_dialog_title));
+        alert.setPositiveButton(getString(R.string.ok), new DialogInterface.OnClickListener() {
+            @Override
+            public void onClick(DialogInterface dialogInterface, int i) {
+                dialogInterface.cancel();
             }
         });
 
+        alert.create().show();
     }
-
     @OnClick(R.id.upload_button)
     void upload() {
         mProgressBar.setVisibility(View.VISIBLE);
@@ -184,7 +219,6 @@ public class MainActivity extends AppCompatActivity {
 
     private void onSignedOutCleanup() {
         mUsername = ANONYMOUS;
-
     }
 
     void csvFilePicker() {
@@ -199,7 +233,6 @@ public class MainActivity extends AppCompatActivity {
         super.onActivityResult(requestCode, resultCode, data);
         if (requestCode == RC_PICK_CSV && resultCode == RESULT_OK) {
             importCSV(new File(data.getData().getPath()), data);
-
         }
         if (requestCode == RC_SIGN_IN) {
             if (resultCode == RESULT_OK) {
@@ -223,34 +256,43 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     public void onBackPressed() {
-        super.onBackPressed();
+        if (doubleBackToExitPressedOnce) {
+            super.onBackPressed();
+            return;
+        }
+        this.doubleBackToExitPressedOnce = true;
+        Toast.makeText(this, getString(R.string.double_back_press), Toast.LENGTH_SHORT).show();
+        new Handler().postDelayed(new Runnable() {
+            @Override
+            public void run() {
+                doubleBackToExitPressedOnce = false;
+            }
+        }, 2000);
+
         LinearLayout layoutBefore = findViewById(R.id.layoutBefore);
         layoutBefore.setVisibility(View.VISIBLE);
         LinearLayout layoutAfter = findViewById(R.id.layoutAfter);
         layoutAfter.setVisibility(View.GONE);
     }
 
-    void importCSV(File path, Intent data) {
+    private void importCSV(File path, Intent data) {
         List<String> headerList = null;
         Log.d(TAG, "path of the file is : " + path.toString());
         File csvFile = new File(data.getData().getPath());
         csvFile = new File(csvFile.getAbsolutePath());
         try {
-
             headerList = new ArrayList<>();
             BufferedReader csvFileRead = new BufferedReader(new FileReader(csvFile));
             String headerLine = csvFileRead.readLine();
             String[] headerArray = headerLine.split(",");
             headerList = Arrays.asList(headerArray);
             for (String item : headerList)
-                Log.e(TAG, item);
-            //Log.e(TAG, headerList   .get(3));
+                Log.d(TAG, item);
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         } catch (IOException e) {
             e.printStackTrace();
         }
-
 
         LinearLayout layoutBefore = findViewById(R.id.layoutBefore);
         layoutBefore.setVisibility(View.GONE);
@@ -265,15 +307,73 @@ public class MainActivity extends AppCompatActivity {
             public void onSuccess(UploadTask.TaskSnapshot taskSnapshot) {
                 mProgressBar.setVisibility(View.GONE);
                 Toast.makeText(MainActivity.this, "File Sucessfully Uploaded", Toast.LENGTH_LONG).show();
-//                Intent intent = new Intent(MainActivity.this, GraphActivity.class);
-                //              startActivity(intent);
             }
         });
     }
 
+    /**
+     * Helper method for setting up spinners
+     *
+     * @param headers The contents of spinner.
+     */
     private void setupspinner(List<String> headers) {
         ArrayAdapter<String> spinnerAdapter = new ArrayAdapter<String>(this, android.R.layout.simple_spinner_dropdown_item, headers);
         mSpinnerX.setAdapter(spinnerAdapter);
         mSpinnerY.setAdapter(spinnerAdapter);
+    }
+
+    /**
+     * Post method, Used to post to the server, via volley
+     *
+     * @param xValue The x coordinate for the graph selected by the user.
+     * @param yValue The y coordinate for the graph selected by the user.
+     */
+    private void makePostRequest(final String xValue, final String yValue) {
+        final String url = "http://localhost:8080";
+        StringRequest postRequest = new StringRequest(Request.Method.POST, url, new Response.Listener<String>() {
+            @Override
+            public void onResponse(String response) {
+                Log.d(TAG, "success!, file transfer to local host!");
+                Log.d("Respone", response);
+            }
+        }, new Response.ErrorListener() {
+            @Override
+            public void onErrorResponse(VolleyError error) {
+                Log.d("Error Response", error.toString());
+            }
+        }) {
+            @Override
+            protected Map<String, String> getParams() throws AuthFailureError {
+                Map<String, String> params = new HashMap<String, String>();
+                params.put("xvalue", xValue);
+                params.put("yvalue", yValue);
+                return params;
+            }
+        };
+        mRequestQueue.add(postRequest);
+    }
+
+    /**
+     * Helper method for getting the response back from the server, Server gives a json result
+     * of image, which is inserted into the image view using Glide.
+     */
+    private void makeGetRequest() {
+        final String url = "";
+
+        // Prepare the Request.
+        JsonObjectRequest getRequest = new JsonObjectRequest(Request.Method.GET, url, null,
+                new Response.Listener<JSONObject>() {
+                    @Override
+                    public void onResponse(JSONObject response) {
+                        Log.d("Response", response.toString());
+                    }
+                },
+                new Response.ErrorListener() {
+                    @Override
+                    public void onErrorResponse(VolleyError error) {
+                        Log.d("Error Response", error.toString());
+                    }
+                });
+        mRequestQueue.add(getRequest);
     }
 }
